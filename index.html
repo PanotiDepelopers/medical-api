@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">  <!-- ADD THIS LINE -->
   <title>Osler — parallel segment download + decryption</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -610,7 +611,14 @@
 
     <div class="vm-body">
       <div class="vm-video-wrap">
-        <video id="modalVideo" playsinline controls controlsList="nodownload"></video>
+        <video 
+            id="modalVideo" 
+            playsinline 
+            controls 
+            controlslist="nodownload"
+            crossOrigin="anonymous"
+            referrerPolicy="no-referrer">
+        </video>
         <div class="vm-overlay" id="vmLoadingOverlay">
           <div class="vm-spinner"></div>
           <h4>Preparing lecture…</h4>
@@ -686,6 +694,48 @@
 <script>
 (function(){
   'use strict';
+
+  // ADD THIS BLOCK RIGHT AFTER 'use strict':
+  
+  // Block Origin and Referer headers for CDN requests
+  const originalSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
+  XMLHttpRequest.prototype.setRequestHeader = function(name, value) {
+      const lower = name.toLowerCase();
+      // Check if this request is going to the CDN
+      if (this._url && this._url.includes('b-cdn.net')) {
+          if (lower === 'origin' || lower === 'referer') {
+              console.log(`Blocked ${name} header for CDN request`);
+              return; // Don't set these headers
+          }
+      }
+      return originalSetRequestHeader.call(this, name, value);
+  };
+
+  const originalXHROpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(method, url, async, user, password) {
+      this._url = url; // Store URL for checking in setRequestHeader
+      return originalXHROpen.call(this, method, url, async !== false, user, password);
+  };
+
+  // Also override fetch (just in case)
+  const originalFetch = window.fetch;
+  window.fetch = function(input, init) {
+      const url = typeof input === 'string' ? input : (input.url || '');
+      if (url && url.includes('b-cdn.net')) {
+          init = init || {};
+          // Remove headers
+          if (init.headers) {
+              const headers = new Headers(init.headers);
+              headers.delete('Origin');
+              headers.delete('origin');
+              headers.delete('Referer');
+              headers.delete('referer');
+              init.headers = headers;
+          }
+      }
+      return originalFetch.call(this, input, init);
+  };
+
 
   const API_BASE = 'https://medical-ui-api.duckdns.org';
 
@@ -1242,16 +1292,21 @@
     vmTitle.textContent = videoName || 'Unnamed video';
     vmStatusText.textContent = 'Connecting…';
 
-    try{
-      const streamData = await apiCall(`/api/stream/${videoId}`, { method:'POST' });
-      if(!streamData.success || !streamData.stream_url){
-        setVmState('error', "We couldn't retrieve a stream for this lecture.");
-        return;
-      }
-      const finalUrl = streamData.stream_url;
-      diagConn.textContent = 'Established';
+    try {
+        const streamData = await apiCall(`/api/stream/${videoId}`, { method: 'POST' });
+        if (!streamData.success || !streamData.stream_url) {
+            setVmState('error', "We couldn't retrieve a stream for this lecture.");
+            return;
+        }
+        
+        const finalUrl = streamData.stream_url;
+        diagConn.textContent = 'Established';
 
-      if(finalUrl.includes('youtu.be') || finalUrl.includes('youtube.com')){
+        // ADD THESE TWO LINES RIGHT HERE:
+        modalVideo.setAttribute('crossOrigin', 'anonymous');
+        modalVideo.setAttribute('referrerPolicy', 'no-referrer');
+
+        if (finalUrl.includes('youtu.be') || finalUrl.includes('youtube.com')) {
         modalVideo.src = finalUrl;
         modalVideo.play().catch(() => {});
         setVmState('none');
